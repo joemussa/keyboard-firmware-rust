@@ -8,13 +8,13 @@ license = "MIT OR Apache-2.0 OR Zlib"
 [dependencies]
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
-embedded-hal = "0.2"
+embedded-hal = "1.0.0"
 embedded-time = "0.12"
 panic-reset = "0.1"
 rp2040-boot2 = "0.3"
-rp2040-hal = { version = "0.9", features = ["rt", "critical-section-impl"] }
-usb-device = "0.2"
-usbd-hid = "0.6"
+rp2040-hal = { version = "0.10.0", features = ["rt", "critical-section-impl"] }
+usb-device = "0.3.2"
+usbd-hid = "0.7.0"
 critical-section = { version = "1.0.0" }
 
 # Dependencies for debug probe

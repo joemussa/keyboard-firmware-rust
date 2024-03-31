@@ -5,6 +5,7 @@
 #![no_std]
 
 use usb_device::class::UsbClass;
+
 mod debounce;
 mod hid_descriptor;
 mod key_codes;
@@ -12,11 +13,14 @@ mod key_mapping;
 mod key_scan;
 
 use core::{cell::RefCell, convert::Infallible};
+
 use critical_section::Mutex;
+
 use defmt::{error, info, warn};
 use defmt_rtt as _;
-use embedded_hal::digital::v2::{InputPin, OutputPin};
 use panic_probe as _;
+
+use embedded_hal::digital::{InputPin, OutputPin};
 use rp2040_hal::{
     pac::{self, interrupt},
     usb::{self, UsbBus},
@@ -48,8 +52,8 @@ const DEBOUNCE_TICKS: u8 = DEBOUNCE_MS / (SCAN_LOOP_RATE_MS as u8);
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-const NUM_COLS: usize = 14;
-const NUM_ROWS: usize = 6;
+const NUM_COLS: usize = 5;
+const NUM_ROWS: usize = 5;
 
 const EXTERNAL_CRYSTAL_FREQUENCY_HZ: u32 = 12_000_000;
 
@@ -77,7 +81,8 @@ fn panic() -> ! {
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    info!("Start of main()");
+    info!("[INFO] Start of main() ...");
+
     let mut pac = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
 
@@ -102,13 +107,13 @@ fn main() -> ! {
         rp2040_hal::gpio::Pins::new(pac.IO_BANK0, pac.PADS_BANK0, sio.gpio_bank0, &mut pac.RESETS);
 
     // Set up keyboard matrix pins.
-    let rows: &[&dyn InputPin<Error = Infallible>] = &[
-        &pins.gpio26.into_pull_down_input(),
-        &pins.gpio25.into_pull_down_input(),
-        &pins.gpio27.into_pull_down_input(),
-        &pins.gpio28.into_pull_down_input(),
-        &pins.gpio15.into_pull_down_input(),
-        &pins.gpio24.into_pull_down_input(),
+    let rows: &mut [&mut dyn InputPin<Error = Infallible>] = &mut[
+        &mut pins.gpio26.into_pull_down_input(),
+        &mut pins.gpio25.into_pull_down_input(),
+        &mut pins.gpio27.into_pull_down_input(),
+        &mut pins.gpio28.into_pull_down_input(),
+        &mut pins.gpio15.into_pull_down_input(),
+        &mut pins.gpio24.into_pull_down_input(),
     ];
 
     let cols: &mut [&mut dyn OutputPin<Error = Infallible>] = &mut [
@@ -151,11 +156,12 @@ fn main() -> ! {
     if scan[0][0] {
         let gpio_activity_pin_mask = 0;
         let disable_interface_mask = 0;
-        info!("Escape key detected on boot, going into bootloader mode.");
+
+        info!("[DEBUG] Escape key has been detected on boot, going into bootloader mode...");
         rp2040_hal::rom_data::reset_to_usb_boot(gpio_activity_pin_mask, disable_interface_mask);
     }
 
-    info!("Initializing USB");
+    info!("[INFO] Initializing USB...");
     // Initialize USB
     let force_vbus_detect_bit = true;
     let usb_bus = UsbBus::new(
@@ -166,7 +172,7 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
     let bus_allocator = UsbBusAllocator::new(usb_bus);
-    let bus_ref = unsafe {
+    let usb_bus_ref = unsafe {
         // Note (safety): This is safe as interrupts haven't been started yet
         USB_BUS = Some(bus_allocator);
         // We are promising to the compiler not to take mutable access to this global
@@ -175,7 +181,7 @@ fn main() -> ! {
     };
 
     let hid_endpoint = HIDClass::new_with_settings(
-        bus_ref,
+        usb_bus_ref,
         hid_descriptor::KEYBOARD_REPORT_DESCRIPTOR,
         USB_POLL_RATE_MS,
         HidClassSettings {
@@ -187,21 +193,25 @@ fn main() -> ! {
     );
 
     // https://github.com/obdev/v-usb/blob/7a28fdc685952412dad2b8842429127bc1cf9fa7/usbdrv/USB-IDs-for-free.txt#L128
-    let keyboard_usb_device = UsbDeviceBuilder::new(bus_ref, UsbVidPid(0x16c0, 0x27db))
-        .manufacturer("bschwind")
-        .product("key ripper")
-        .supports_remote_wakeup(true)
-        .build();
+    let keyboard_usb_dev = UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x16c0, 0x27db))
+    .strings(&[StringDescriptors::new(LangID::EN_US)
+        .product("Giga Pad")
+        .manufacturer("Musser Labs")
+        .serial_number("42069")])
+    .expect("[Fail] Failed to set UsbDeviceBuilder:: string values")
+    .supports_remote_wakeup(true)
+    .build();
     unsafe {
         // Note (safety): This is safe as interrupts haven't been started yet
         USB_HID = Some(hid_endpoint);
-        USB_DEVICE = Some(keyboard_usb_device);
+        USB_DEVICE = Some(keyboard_usb_dev);
     }
-    info!("Enabling USB interrupt handler");
+    info!("[INFO] Enabling the USB interrupt handler...");
     unsafe {
         pac::NVIC::unmask(pac::Interrupt::USBCTRL_IRQ);
     }
-    info!("Entering main loop");
+
+    info!("[INFO] Entering the main loop...");
     loop {
         let scan = KeyScan::scan(rows, cols, &mut delay, &mut debounce);
         critical_section::with(|cs| {
